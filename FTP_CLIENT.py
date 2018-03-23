@@ -373,7 +373,6 @@ def main():
 	
 	# Change directory:
 	changeWorkingDirectory(tcpControlSocket, '/files/')
-	listFilesInWorkingDirectory(tcpControlSocket)
 	
 	# Obtain Data connection port used by the server:
 	#dataConnectionSocket = createPassiveConnection(tcpControlSocket)
