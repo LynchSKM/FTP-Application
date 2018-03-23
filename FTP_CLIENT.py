@@ -135,7 +135,7 @@ def determineServerFileSeparator(pathName):
 	'''
 	indexFilePathSep = pathName.find('/')
 	if indexFilePathSep==-1:
-		filesep = r'"\"'
+		filesep = r'\\'
 	else:
 		filesep = r'/'
 	return filesep
@@ -361,7 +361,7 @@ def listFilesInWorkingDirectory(tcpControlSocket, pathName=""):
 def main():
 	# Server Name:
 	hostServerName = 'ELEN4017.ug.eie.wits.ac.za'
-	#hostServerName = '127.0.0.1'
+	hostServerName = '127.0.0.1'
 	print("============== INITIALIZE ===============")
 	tcpControlSocket = initializeFTPConnection(hostServerName)
 	
