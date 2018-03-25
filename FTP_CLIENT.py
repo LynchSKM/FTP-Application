@@ -4,7 +4,6 @@ import sys
 import os
 
 
-
 def initializeFTPConnection(serverName):
 	'''
 		initializeFTPConnection creates the TCP control connection
@@ -20,7 +19,7 @@ def initializeFTPConnection(serverName):
 
 	# Create Client TCP socket:
 	tcpControlSocket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-
+	
 	# Connect to the client socket to the port where the server is listening:
 	tcpControlSocket.connect(serverAddress)
 	
@@ -49,10 +48,7 @@ def doLogin(tcpControlSocket, username, password):
 	getServerResponse(tcpControlSocket)
 	
 	# Obtain current working directory:
-	sendCommand(tcpControlSocket, 'PWD')
-	directory = getServerResponse(tcpControlSocket)
-	
-	listFilesInWorkingDirectory(tcpControlSocket)
+	directory = printWorkingDirectory(tcpControlSocket)
 	
 	
 #------------------------------------------------------------	
@@ -67,29 +63,33 @@ def createPassiveConnection(tcpControlSocket):
 	sendCommand(tcpControlSocket, 'PASV')
 	response = getServerResponse(tcpControlSocket)
 	
-	#
-	indexFirstBracket = response[1].find("(")
-	indexLastBracket  = response[1].rfind(")")
-	dataPortAddress   = response[1]
-	
-	# Copy IP Address and Port number:
-	dataPortAddress   = dataPortAddress[indexFirstBracket+1:indexLastBracket]
-	
-	# Split into IP address and use other numbers to calculate the data port:
-	serverAddress     = dataPortAddress.split(",")
-	tempServerName    = serverAddress[0:4]
-	
-	temp = ""
-	for i in range(len(tempServerName)-1):
-		temp = temp+tempServerName[i]+'.'
-	
-	# ServerName should now contain FTP server's IP Address:
-	serverName = temp+tempServerName[-1]
-	
-	# Determine port being used using formula [0]*256+[1]:
-	tempServerDataPort = serverAddress[4:]
-	serverTCPDataPort  = int((int(tempServerDataPort[0]) * 256) + int(tempServerDataPort[1]))
-	
+	if response[0]=="200" or response[0] == "227":
+		#
+		indexFirstBracket = response[1].find("(")
+		indexLastBracket  = response[1].rfind(")")
+		dataPortAddress   = response[1]
+		
+		# Copy IP Address and Port number:
+		dataPortAddress   = dataPortAddress[indexFirstBracket+1:indexLastBracket]
+		
+		# Split into IP address and use other numbers to calculate the data port:
+		serverAddress     = dataPortAddress.split(",")
+		tempServerName    = serverAddress[0:4]
+		
+		temp = ""
+		for i in range(len(tempServerName)-1):
+			temp = temp+tempServerName[i]+'.'
+		
+		# ServerName should now contain FTP server's IP Address:
+		serverName = temp+tempServerName[-1]
+		
+		# Determine port being used using formula [0]*256+[1]:
+		tempServerDataPort = serverAddress[4:]
+		serverTCPDataPort  = int((int(tempServerDataPort[0]) * 256) + int(tempServerDataPort[1]))
+	else: # Use default port:
+		serverTCPDataPort = 20
+		temp = tcpControlSocket.getpeername() # Returns server name and port binded to socket 
+		serverName = str(temp[0])
 	# Create Client Data Transmission Socket:
 	# Server Address where server listens for TCP connection:
 	serverDataTransmissionAddress = (serverName,serverTCPDataPort)
@@ -133,12 +133,14 @@ def determineServerFileSeparator(pathName):
 		determineServerFileSeparator obtains the file path separator used by 
 		the FTP Server.
 	'''
+	temp = r'\\\\'
+	pathName = pathName.replace(r'\\', temp)
 	indexFilePathSep = pathName.find('/')
 	if indexFilePathSep==-1:
 		filesep = r'\\'
 	else:
 		filesep = r'/'
-	return filesep
+	return filesep, pathName
 	
 #------------------------------------------------------------	
 def download(tcpControlSocket, file, outputPath):
@@ -150,16 +152,11 @@ def download(tcpControlSocket, file, outputPath):
 	'''
 	print("============ DOWNLOADING ===============")
 	# Obtain current working directory:
-	sendCommand(tcpControlSocket, 'PWD')
-	response = getServerResponse(tcpControlSocket)
-	downloadPath = response[1]
-	
-	indexFirstElement = response[1].find('"')
-	indexLastElement  = response[1].rfind('"')
-	downloadPath = downloadPath[indexFirstElement+1:indexLastElement]
+	downloadPath = printWorkingDirectory(tcpControlSocket)
 	
 	# Get file path separator:
-	filesep = determineServerFileSeparator(downloadPath)
+	filesep, downloadPath = determineServerFileSeparator(downloadPath)
+	print(downloadPath)
 	
 	# Send 
 	type = 'I'
@@ -184,27 +181,32 @@ def download(tcpControlSocket, file, outputPath):
 	
 	#if type.upper()=='I':
 	# Write binary file to file path:
-	downloadedData = dataConnectionSocket.recv(8192)
+	try:
+		downloadedData = dataConnectionSocket.recv(8192)
 
-	with open(filename, 'wb') as currentDownload:
-		print("Starting Download...")
-		while downloadedData:
-			currentDownload.write(downloadedData)
-			downloadedData = dataConnectionSocket.recv(8192)
+		with open(filename, 'wb') as currentDownload:
+			print("Starting Download...")
+			while downloadedData:
+				currentDownload.write(downloadedData)
+				downloadedData = dataConnectionSocket.recv(8192)
+			
+			# Close the file:
+			currentDownload.close()
+			
+		#elif type.upper() == 'ASCII':
+		# Done downloading:
+		print('Downloading Complete')
 		
-		# Close the file:
-		currentDownload.close()
+		# close data connection socket:
+		dataConnectionSocket.close()
 		
-	#elif type.upper() == 'ASCII':
-	# Done downloading:
-	print('Downloading Complete')
-	
-	# close data connection socket:
-	dataConnectionSocket.close()
-	
-	# Print Server Response after download completion:
-	response = getServerResponse(tcpControlSocket)
-	print("========= DOWNLOADING DONE ============")
+		# Print Server Response after download completion:
+		response = getServerResponse(tcpControlSocket)
+		print("========= DOWNLOADING DONE ============")
+	except:
+		print('Connection closed. Failed to download.')
+		# close data connection socket:
+		dataConnectionSocket.close()
 	
 #------------------------------------------------------------
 def upload(tcpControlSocket, file, currentDirectory=""):
@@ -218,16 +220,11 @@ def upload(tcpControlSocket, file, currentDirectory=""):
 	'''
 	print("============== UPLOADING ==================")
 	# Obtain current working directory:
-	sendCommand(tcpControlSocket, 'PWD')
-	response = getServerResponse(tcpControlSocket)
-	uploadPath = response[1]
-	
-	indexFirstElement = response[1].find('"')
-	indexLastElement  = response[1].rfind('"')
-	uploadPath = uploadPath[indexFirstElement+1:indexLastElement]
+	uploadPath = printWorkingDirectory(tcpControlSocket)
 	
 	# Check file path separator:
-	filesep = determineServerFileSeparator(uploadPath)
+	filesep, uploadPath = determineServerFileSeparator(uploadPath)
+	print(uploadPath)
 	
 	# Send  
 	type = 'I'  # Binary 
@@ -248,35 +245,47 @@ def upload(tcpControlSocket, file, currentDirectory=""):
 	response = getServerResponse(tcpControlSocket)
 	
 	# Upload file:
-	currentDirectory = currentDirectory.replace("\\","/")
-	currentDirectory = currentDirectory.replace('"','')
-	filesep = '/'
-	filename = [currentDirectory, filesep, file]
-	filename = "".join(filename)
+	indexFilePathSep = currentDirectory.find('\\\\')
+	if indexFilePathSep==-1:
+		temp = currentDirectory.find('\\')
+		if temp==-1:
+			currentDirectory = currentDirectory.replace("\\","/")
+			currentDirectory = currentDirectory.replace('"','')
+	else:
+		currentDirectory = currentDirectory.replace("\\\\","/")
 	
+	filesep = r'/'
+	filename = [r'',currentDirectory, filesep, file]
+	filename = ''.join(filename)
+	filename = os.path.normpath(filename)
 	#if type.upper()=='I':
 	# Write binary file to file path:
-	with open(filename, 'rb') as currentUpload:
-		uploadedData = currentUpload.read(8192)
-		
-		while uploadedData:
-			print("Reading file...")
-			dataConnectionSocket.send(uploadedData)
+	try:
+		with open(filename, 'rb') as currentUpload:
 			uploadedData = currentUpload.read(8192)
-		# Close the file:
-		currentUpload.close()
-	
-	#elif type.upper() == 'ASCII':
-	# Done uploading:
-	print("Done Uploading {}!".format(file))
-	
-	# Close Data Connection Socket:
-	dataConnectionSocket.close()
-	
-	# Get FTP Server Response:
-	response = getServerResponse(tcpControlSocket)
-	print("============ UPLOADING DONE ===============")
-	
+			print("Reading file...")
+			while uploadedData:
+				dataConnectionSocket.send(uploadedData)
+				uploadedData = currentUpload.read(8192)
+			# Close the file:
+			currentUpload.close()
+		
+		#elif type.upper() == 'ASCII':
+		# Done uploading:
+		print("Done Uploading {}!".format(file))
+		
+		# Close Data Connection Socket:
+		dataConnectionSocket.close()
+
+		# Get FTP Server Response:
+		response = getServerResponse(tcpControlSocket)
+		print("============ UPLOADING DONE ===============")
+	except:
+		print("Connection closed. Failed to upload.")
+		dataConnectionSocket.close()
+		
+		# Get FTP Server Response:
+		getServerResponse(tcpControlSocket)
 #------------------------------------------------------------	 
 def doLogout(tcpControlSocket):
 	'''
@@ -297,6 +306,25 @@ def terminateConnection(tcpControlSocket, dataConnectionSocket):
 	dataConnectionSocket.close()
 	print("All connections have been closed.")
 
+#------------------------------------------------------------
+def printWorkingDirectory(tcpControlSocket):
+	'''
+		printWorkingDirectory sends the FTP PWD command and will display
+		the current directory in focus on the FTP Server.
+	'''
+	# Obtain current working directory:
+	sendCommand(tcpControlSocket, 'PWD','')
+	response = getServerResponse(tcpControlSocket)
+	activeDirectory = response[1]
+	
+	indexFirstElement = response[1].find('"')
+	indexLastElement  = response[1].rfind('"')
+	activeDirectory   = activeDirectory[indexFirstElement+1:indexLastElement]
+	
+	# Update list of files or folders:
+	listFilesInWorkingDirectory(tcpControlSocket)
+	
+	return activeDirectory
 #------------------------------------------------------------
 def changeWorkingDirectory(tcpControlSocket, newPathName):
 	'''
@@ -319,13 +347,12 @@ def listFilesInWorkingDirectory(tcpControlSocket, pathName=""):
 		It returns the list sent by the server over the data connection socket.
 	'''
 	# Obtain current working directory:
-	#sendCommand(tcpControlSocket, 'PWD','')
-	#activeDirectory = getServerResponse(tcpControlSocket)
+	#activeDirectory = printWorkingDirectory(tcpControlSocket)
 	print("============= GETTING LIST ================")
 	dataConnectionSocket = createPassiveConnection(tcpControlSocket)
 	
-	#sendCommand(tcpControlSocket, 'LIST', pathName)
-	sendCommand(tcpControlSocket, 'NLST', pathName)
+	sendCommand(tcpControlSocket, 'LIST', pathName)
+	#sendCommand(tcpControlSocket, 'NLST', pathName)
 	response = getServerResponse(tcpControlSocket)
 
 	
@@ -361,9 +388,11 @@ def listFilesInWorkingDirectory(tcpControlSocket, pathName=""):
 def main():
 	# Server Name:
 	hostServerName = 'ELEN4017.ug.eie.wits.ac.za'
-	hostServerName = '127.0.0.1'
+	#hostServerName = 'localhost'
+	hostServerName = 'SEREPONG-PC'
 	print("============== INITIALIZE ===============")
 	tcpControlSocket = initializeFTPConnection(hostServerName)
+	print(" {} port {}".format(*tcpControlSocket.getpeername()))
 	
 	# Login:
 	username = 'group6'
@@ -372,22 +401,23 @@ def main():
 	doLogin(tcpControlSocket, username, password)
 	
 	# Change directory:
-	changeWorkingDirectory(tcpControlSocket, '/files/')
+	#changeWorkingDirectory(tcpControlSocket, '/files')
+	changeWorkingDirectory(tcpControlSocket, '/files')
 	
 	# Obtain Data connection port used by the server:
 	#dataConnectionSocket = createPassiveConnection(tcpControlSocket)
+	
+	# Upload file:
+	#currentDirectory = r'C:Users\Lynch-Stephen\Documents\Lecture Notes\4th year\ELEN4017A\Project'
+	currentDirectory = r'C:/Users/Lynch-Stephen/Documents/Lecture Notes/4th year/ELEN4017A/Project'
+	file = 'test Code.txt'
+	upload(tcpControlSocket, file, currentDirectory)
+	listFilesInWorkingDirectory(tcpControlSocket)
 	
 	# Download file:
 	saveFileInDirectory = r'C:/Users/Lynch-Stephen/Documents/Lecture Notes/4th year/ELEN4017A/Project/temp'
 	file = 'rfc959.pdf'
 	download(tcpControlSocket, file, saveFileInDirectory)
-	
-	# Upload file:
-	#currentDirectory = r'"C:Users\Lynch-Stephen\Documents\Lecture Notes\4th year\ELEN4017A\Project"'
-	currentDirectory = r'C:/Users/Lynch-Stephen/Documents/Lecture Notes/4th year/ELEN4017A/Project/temp'
-	file = 'rfc959.pdf'
-	upload(tcpControlSocket, file, currentDirectory)
-	listFilesInWorkingDirectory(tcpControlSocket)
 	
 	
 	# Terminate the connection:
