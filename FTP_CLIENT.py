@@ -30,7 +30,7 @@ def initializeFTPConnection(serverName):
 	return tcpControlSocket
 	
 #------------------------------------------------------------	
-def doLogin(tcpControlSocket, username, password):
+def doLogin(tcpControlSocket, username='', password=''):
 	'''
 		doLogin logs onto the FTP Server with the specified username 
 		and password of the client. The commands are sent through the 
@@ -185,7 +185,7 @@ def download(tcpControlSocket, file, outputPath):
 		downloadedData = dataConnectionSocket.recv(8192)
 
 		with open(filename, 'wb') as currentDownload:
-			print("Starting Download...")
+			print("Downloading...")
 			while downloadedData:
 				currentDownload.write(downloadedData)
 				downloadedData = dataConnectionSocket.recv(8192)
@@ -263,7 +263,7 @@ def upload(tcpControlSocket, file, currentDirectory=""):
 	try:
 		with open(filename, 'rb') as currentUpload:
 			uploadedData = currentUpload.read(8192)
-			print("Reading file...")
+			print("Uploading file...")
 			while uploadedData:
 				dataConnectionSocket.send(uploadedData)
 				uploadedData = currentUpload.read(8192)
@@ -322,13 +322,13 @@ def printWorkingDirectory(tcpControlSocket):
 	activeDirectory   = activeDirectory[indexFirstElement+1:indexLastElement]
 	
 	# Update list of files or folders:
-	listFilesInWorkingDirectory(tcpControlSocket)
+	#listFilesInWorkingDirectory(tcpControlSocket)
 	
 	return activeDirectory
 #------------------------------------------------------------
 def changeWorkingDirectory(tcpControlSocket, newPathName):
 	'''
-		changeWorkingDirectory is responsible for implementing the CWD FTP command.
+		changeWorkingDirectory implements the CWD FTP command.
 		
 		The client will change the current working directory and the function will then
 		request a new list of the items in the new directory.
@@ -337,7 +337,30 @@ def changeWorkingDirectory(tcpControlSocket, newPathName):
 	getServerResponse(tcpControlSocket)
 	
 	# Update list:
-	listFilesInWorkingDirectory(tcpControlSocket, newPathName)
+	#listFilesInWorkingDirectory(tcpControlSocket, newPathName)
+	
+#------------------------------------------------------------
+def makeWorkingDirectory(tcpControlSocket, newDirectoryName):
+	'''
+		makeWorkingDirectory implements the MKD FTP command.
+		
+		The client will create a new directory in the current working directory and
+		the function will then request a new list of the items in the updated directory.
+	'''
+	sendCommand(tcpControlSocket, 'MKD', newDirectoryName)
+	getServerResponse(tcpControlSocket)
+	
+#------------------------------------------------------------
+def deleteDirectory(tcpControlSocket, directoryName):
+	'''
+		deleteDirectory implements the DELE FTP command.
+		
+		The client will delete a directory in the current working directory and the function
+		will then request an updated list of the items in the directory.
+	'''
+	sendCommand(tcpControlSocket, 'DELE', directoryName)
+	getServerResponse(tcpControlSocket)
+	
 #------------------------------------------------------------
 def listFilesInWorkingDirectory(tcpControlSocket, pathName=""):
 	'''
@@ -389,7 +412,7 @@ def main():
 	# Server Name:
 	hostServerName = 'ELEN4017.ug.eie.wits.ac.za'
 	#hostServerName = 'localhost'
-	hostServerName = 'SEREPONG-PC'
+	#hostServerName = 'SEREPONG-PC'
 	print("============== INITIALIZE ===============")
 	tcpControlSocket = initializeFTPConnection(hostServerName)
 	print(" {} port {}".format(*tcpControlSocket.getpeername()))
@@ -401,7 +424,6 @@ def main():
 	doLogin(tcpControlSocket, username, password)
 	
 	# Change directory:
-	#changeWorkingDirectory(tcpControlSocket, '/files')
 	changeWorkingDirectory(tcpControlSocket, '/files')
 	
 	# Obtain Data connection port used by the server:
@@ -410,9 +432,11 @@ def main():
 	# Upload file:
 	#currentDirectory = r'C:Users\Lynch-Stephen\Documents\Lecture Notes\4th year\ELEN4017A\Project'
 	currentDirectory = r'C:/Users/Lynch-Stephen/Documents/Lecture Notes/4th year/ELEN4017A/Project'
-	file = 'test Code.txt'
-	upload(tcpControlSocket, file, currentDirectory)
-	listFilesInWorkingDirectory(tcpControlSocket)
+	file = 'test video2.mp4'
+	sendCommand(tcpControlSocket,'SIZE',file)
+	getServerResponse(tcpControlSocket)
+	#upload(tcpControlSocket, file, currentDirectory)
+	#listFilesInWorkingDirectory(tcpControlSocket)
 	
 	# Download file:
 	saveFileInDirectory = r'C:/Users/Lynch-Stephen/Documents/Lecture Notes/4th year/ELEN4017A/Project/temp'
