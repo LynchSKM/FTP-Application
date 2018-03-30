@@ -232,6 +232,11 @@
        <height>431</height>
       </rect>
      </property>
+     <property name="font">
+      <font>
+       <family>Times New Roman</family>
+      </font>
+     </property>
      <property name="whatsThis">
       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;help&lt;/p&gt;&lt;p&gt;my&lt;/p&gt;&lt;p&gt;self&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
@@ -248,7 +253,7 @@
      <property name="font">
       <font>
        <family>Times New Roman</family>
-       <pointsize>11</pointsize>
+       <pointsize>9</pointsize>
       </font>
      </property>
      <property name="editTriggers">
@@ -264,37 +269,24 @@
       <enum>Qt::ElideLeft</enum>
      </property>
     </widget>
-    <widget class="QPushButton" name="pushButtonParentDirectory">
+    <widget class="QPushButton" name="pushButtonRootDirectory">
      <property name="geometry">
       <rect>
-       <x>600</x>
-       <y>10</y>
-       <width>221</width>
-       <height>31</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Go To Parent Directory</string>
-     </property>
-    </widget>
-    <widget class="QPushButton" name="pushButtonChangeDirectory">
-     <property name="geometry">
-      <rect>
-       <x>680</x>
+       <x>450</x>
        <y>400</y>
-       <width>141</width>
+       <width>111</width>
        <height>41</height>
       </rect>
      </property>
      <property name="text">
-      <string>Up</string>
+      <string>Root Directory</string>
      </property>
     </widget>
     <widget class="QPushButton" name="pushButtonDeleteDirectory">
      <property name="geometry">
       <rect>
        <x>680</x>
-       <y>450</y>
+       <y>400</y>
        <width>141</width>
        <height>41</height>
       </rect>
@@ -332,7 +324,7 @@
      <property name="geometry">
       <rect>
        <x>450</x>
-       <y>400</y>
+       <y>450</y>
        <width>171</width>
        <height>41</height>
       </rect>
@@ -347,11 +339,11 @@
       <string>Download</string>
      </property>
     </widget>
-    <widget class="QPushButton" name="pushButtonMakeDirectory">
+    <widget class="QPushButton" name="pushButtonCreateDirectory">
      <property name="geometry">
       <rect>
        <x>680</x>
-       <y>500</y>
+       <y>10</y>
        <width>141</width>
        <height>31</height>
       </rect>
@@ -360,11 +352,11 @@
       <string>New Folder</string>
      </property>
     </widget>
-    <widget class="QLineEdit" name="lineEditHostName_2">
+    <widget class="QLineEdit" name="lineEditNewDirectory">
      <property name="geometry">
       <rect>
        <x>450</x>
-       <y>500</y>
+       <y>10</y>
        <width>211</width>
        <height>31</height>
       </rect>
@@ -376,6 +368,32 @@
        <x>20</x>
        <y>510</y>
        <width>321</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
+    </widget>
+    <widget class="QLabel" name="labelUploadStatus">
+     <property name="geometry">
+      <rect>
+       <x>250</x>
+       <y>460</y>
+       <width>171</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string/>
+     </property>
+    </widget>
+    <widget class="QLabel" name="labelDownloadStatus">
+     <property name="geometry">
+      <rect>
+       <x>660</x>
+       <y>460</y>
+       <width>161</width>
        <height>21</height>
       </rect>
      </property>
