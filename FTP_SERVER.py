@@ -4,6 +4,7 @@ import os
 import sys
 import stat
 import datetime
+import shutil
 
 fileLock  = threading.Lock()
 BUSYFILES = []
@@ -39,12 +40,19 @@ def isUserPassWordValid(dataBase,userName,passWord):
 	return False
 #End_User Validation
 
-def UploadFile(filename,commandSocket,dataConnection,mode='rb'): 
+def UploadFile(connectionMode,filename,commandSocket,act_dataConnection,pass_dataConnection,mode='rb'): 
 	bufferSize= 8192 #Define the Buffer Size 8192
 	print("Server Uploading File..")
 	file = filename[filename.rfind('\\')+1:]
 	fileSize = os.path.getsize(filename)
 
+	#select the Mode:
+	if connectionMode == "ACTIVE":
+		dataConnection = act_dataConnection
+	elif connectionMode == "PASSIVE":
+		dataConnection = pass_dataConnection
+	#end
+	
 	#Check if the File Exist before doing anything:
 	if not os.path.exists(filename):
 		message = "550 File not found in CurrentDir.\r\n"
@@ -110,11 +118,18 @@ def UploadFile(filename,commandSocket,dataConnection,mode='rb'):
 	return
 #End_Upload
 
-def DownloadFile(filename,commandSocket,dataConnection): 
+def DownloadFile(connectionMode,filename,commandSocket,act_dataConnection,pass_dataConnection): 
 	bufferSize = 8192 #Define the Buffer Size
 	print("Directory: "+filename)
 	print("Server Downloading File...")
-
+	
+	#select the Mode:
+	if connectionMode == "ACTIVE":
+		dataConnection = act_dataConnection
+	elif connectionMode == "PASSIVE":
+		dataConnection = pass_dataConnection
+	#end
+	
 	#Check if the File is being used or Not:
 	while True:#If the file is found in the BUSYFILES then wait here until is not BUSY
 		try:
@@ -214,11 +229,13 @@ def clientLogIn(clientIP,commandSocket,DataBase):
 					message = "230 Logged in.\r\n"
 					commandSocket.send(message.encode())
 					print("Client Logged in")
-					return True
+					UserPath = os.getcwd()+'\\'+userName
+					_ = ftp_MakeDir(UserPath)
+					return True,userName
 				else:
 					message = "502 incorrect password for  "+userName+".\r\n"
 					commandSocket.send(message.encode())
-					return False
+					return False,'error'
 				#End_if
 			else:
 				message = "502 Command "+command[0]+" not implemented.\r\n"
@@ -227,12 +244,12 @@ def clientLogIn(clientIP,commandSocket,DataBase):
 		else:
 			message = "332 UserName "+userName+" not registered. Need account for log in.\r\n"
 			commandSocket.send(message.encode())
-			return False
+			return False,'error'
 		#End_Else
 	else:
 		message = "502 Command "+command[0]+"not implemented.\r\n"
 		commandSocket.send(message.encode())
-		return False
+		return False,'error'
 #End_LogIn	
 
 def ftp_NLST(directory):
@@ -247,6 +264,58 @@ def ftp_NLST(directory):
 		return response
 	#end if
 #End_LIST
+
+def ftp_MakeDir(directory):
+	if not os.path.exists(directory):
+		os.makedirs(directory)	
+		response = "200 Okay Directory created.\r\n"
+	else:
+		response = "550 Directory NOT created.\r\n"
+	#endIf
+	return response
+#End Function
+	
+def ftp_Size(directory):
+	valid = os.path.isdir(directory)
+	if valid:
+		fileSize = os.path.getsize(directory)
+		response = "213" + str(fileSize)+" \r\n"
+	else:
+		response = "450 directory not found.\r\n"
+	#End_If
+	
+	return response
+#end Size:
+def ftp_STRU():
+	return "200 F\r\n"
+#End_Stru
+def ftp_MODE():
+	return "200 S\r\r"
+#End MOde	
+def ftp_DEL(directory):
+	print('Deleting From Dir: '+directory)
+	print("Server Deleting a file...")
+	try:
+		if os.path.isfile(directory): 
+			print('issa FILE')
+			os.unlink(directory)
+			response = "220 Ok File deleted.\r\n"
+		elif os.path.isdir(directory): 
+			print('issa DIR')
+			shutil.rmtree(directory)
+			response = "220 Ok File deleted.\r\n"
+		else:
+			response = "450 directory NOT found.\r\n"
+		#End_If	
+	except:
+		print('is NOT found')
+		print('Failed to delete')
+		response = "450 directory NOT deleted.\r\n"
+	#End_Try
+	
+	print("Server has deleted a file...")
+	return response
+#End_Del
 
 def ftp_LIST(directory):
 	valid = os.path.isdir(directory)	#Check if the specified Directory exist
@@ -269,41 +338,66 @@ def ftp_LIST(directory):
 	#end if
 #End_LIST
 
-def ftp_CWD(requestedDir,HomeDir, CurrentDir):
+def ftp_CWD(requestedDir,HomeDir, CurrentDir,request):
+	print('Home Dir: '+HomeDir)
 	print('Current Dir: '+CurrentDir)
+	print('requested Dir: '+requestedDir)
+	
+	indexLastElement = request.rfind('\\')
+	if indexLastElement != -1:
+		ftpData = (request[indexLastElement+1:]).strip('\\').strip('/')
+		newPath = HomeDir+requestedDir
+	else:
+		ftpData = (ftpData.strip('/')).strip('\\')
+		newPath = CurrentDir+'\\'+ftpData
+	#EndElse	
+	
+	print('Final Path: '+newPath)
 	#Check if the request Directory Exist in the Current directory
-	temp  = CurrentDir+requestedDir
-	valid = os.path.isdir(temp) 
+	valid = os.path.isdir(newPath) 
 	if valid:
-		newDirectory = temp
-		response = "200 CWD changed to "+newDirectory+"\r\n"
-		return (response,newDirectory)
-	else:#Check if the request Directory Exist in the Home directory
-		temp  = HomeDir+requestedDir
-		valid = os.path.isdir(temp)
-		if valid:
-			newDirectory = temp
-			response = "200 CWD changed to "+newDirectory+".\r\n"
-			return (response,newDirectory)			
-		else:
-			newDirectory = CurrentDir
-			response = "450 requested Dir not found in Current nor Home Dir.\r\n"
-			return (response,newDirectory)
-		#End_if
+		response = "200 CWD changed \r\n"
+	else:
+		response = "450 requested Dir not found in the Home Dir.\r\n"
 	#End_if	
+	return (response,newPath)
 #End_CWD
 
+def PORT(data):
+	listT = data.split(',')
+	upper = int(listT[4]) 
+	lower = int(listT[5])
+	clientIp = '.'.join(listT[:4])
+	clientPort = 256*upper + lower
+	clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	for i in range(0, 5):
+		try:
+			clientSocket.connect((clientIp,clientPort))
+			break
+		except:
+			pass
+		#End_try
+	#End_For
+	message = "220 Entering Active Connection...\r\n"
+	return clientSocket,message
+	
+def ftp_CDUP(CurrentDir):
+	lastIndex = CurrentDir.rfind('\\')
+	newDir = CurrentDir[:lastIndex]
+	return newDir
 def ftp_PWD(homeDir,currDir):
+	print('Home Dir: '+homeDir)
+	print('Current Dir: '+currDir)
+	
 	lastFolder = homeDir.split('\\')
 	lastFolder = lastFolder[-1]
 	if currDir.find(homeDir) != -1:
 		currDir  = currDir.replace(homeDir,'')
-		response = '200 "\\'+lastFolder+currDir+'"\r\n'
+		response = '200 "\\'+currDir+'"\r\n'
 		return response
 	else:
-		return '200 "\\'+lastFolder+'"\r\n'
+		return "200 \\ \r\n"
 #End_PWD
-
 def syntexError():
 	return "501 Syntax error in parameters or arguments.\r\n"
 def ftp_PASV(passDataSocket):
@@ -330,21 +424,17 @@ def ftp_PASV(passDataSocket):
 	response = '227 Entering Passive Mode ('+address+')\r\n'
 	return response
 #end_PASS
-	
 def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 	LANHost = socket.gethostbyname(socket.gethostname())
 	PassivedataSocket = socket.socket()
 	PassivedataSocket.bind((LANHost,0))
 	
 	bufferSize = 7168
-	NewConnection=None
+	passiveConnection = None
+	activeConnection  = None
+	fileMODE = "rb"
 	NewAddress=''
-	
-	#Set the Current Directory for the Client
-	HomeDirectory 	 = os.getcwd() 
-	WorkingDirectory = os.getcwd()
-	print("Home dir= "+HomeDirectory)
-	print("Current dir= "+WorkingDirectory)
+	dataMODE = "PASSIVE"
 	
 	#Send the Hello Message:
 	message = "220 Hello, Nchabeleng File Service.\r\n"
@@ -353,10 +443,17 @@ def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 	#User Validation Process:
 	print('user trying to log in')
 	loggedin = False
+	user = 'error'
 	while not loggedin:
-		loggedin = clientLogIn(clientIP,commandSocket,DataBase)
+		loggedin,user = clientLogIn(clientIP,commandSocket,DataBase)
 	#End_Log in
 	print('user has logged in')
+	
+	#Set the Current Directory for the Client
+	HomeDirectory 	 = os.path.join(os.getcwd(),user) #Se the CLIENT to use hi folder
+	WorkingDirectory = HomeDirectory
+	print("Home dir= "+HomeDirectory)
+	print("Current dir= "+WorkingDirectory)	
 	
 	#Interaction Client
 	while True:
@@ -367,26 +464,80 @@ def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 
 			command  = request.split(' ', 1)
 			print('\n\n'+clientIP+" "+request)
-			ftpCommand  = command[0].rstrip()
+			ftpCommand  = (command[0].rstrip()).upper()
 			ftpData		= command[-1].rstrip()
 				
 				
 			print("ftp C= "+ftpCommand)
 			print("ftp D= "+ftpData)
 			#commandSocket.send(".".encode())
-			if ftpCommand=="QUIT":
+			if   ftpCommand=="QUIT":
 				message = "221 Goodbye.\r\n"
 				commandSocket.send(message.encode())			
 				break
 			
+			elif ftpCommand=="STRU":
+				message = ftp_STRU()
+				commandSocket.send(message.encode())
+				
+			elif ftpCommand=="MODE":
+				message = ftp_MODE()
+				commandSocket.send(message.encode())
+			
+			elif ftpCommand=="MKD":
+				if ftpCommand==ftpData:
+					message = syntexError()
+					commandSocket.send(message.encode())
+				else:
+					ftpData  = (ftpData.strip('\\')).strip('/')
+					filePath = os.path.join(WorkingDirectory,ftpData)
+					message  = ftp_MakeDir(filePath)
+					commandSocket.send(message.encode())
+			
+			elif ftpCommand=="SIZE":
+				if ftpCommand==ftpData:
+					message = syntexError()
+					commandSocket.send(message.encode())
+				else:
+					ftpData  = (ftpData.strip('\\')).strip('/')
+					filePath = os.path.join(HomeDirectory,ftpData)
+					message  = ftp_Size(filePath)
+					commandSocket.send(message.encode())
+
+			elif ftpCommand=="DELE":
+				if ftpCommand==ftpData:
+					message = syntexError()
+					commandSocket.send(message.encode())
+				else:
+					indexLastElement = request.rfind('\\')
+					if indexLastElement != -1:
+						ftpData = request[indexLastElement+1:]
+					else:
+						ftpData = (ftpData.strip('/')).strip('\\')
+					#EndElse
+					filePath = WorkingDirectory+"\\"+ftpData
+					print("path: "+filePath)
+					
+					message = "200 Okay deleting a Folder.\r\n"
+					commandSocket.send(message.encode())
+					#filePath = os.path.join(HomeDirectory,ftpData)
+					message  = ftp_DEL(filePath)
+					commandSocket.send(message.encode())					
+				
 			elif ftpCommand=="PASV":
 				PassivedataSocket.listen(5)
 				message = ftp_PASV(PassivedataSocket)
 				commandSocket.send(message.encode())
 				print("trying to accept connection")
-				
-				NewConnection,NewAddress = PassivedataSocket.accept()
+				dataMODE = "PASSIVE"
+				passiveConnection,NewAddress = PassivedataSocket.accept()
 				print("Data connection was Accepted "+str(NewAddress))
+			
+			elif ftpCommand=="PORT":
+				dataMODE = "ACTIVE"
+				ftpData = ftpData.rstrip().strip('/').strip('\\')
+				activeConnection,message = PORT(ftpData)
+				commandSocket.send(message.encode())
 				
 			elif ftpCommand=="STOR":
 				print("We are going to STORE bbe...")
@@ -400,8 +551,8 @@ def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 						ftpData = request[indexLastElement+1:]
 					path = os.path.join(WorkingDirectory,ftpData)
 					print("path: "+path)
-					DownloadFile(path,commandSocket,NewConnection)
-					NewConnection.close()
+					DownloadFile(dataMODE,path,commandSocket,activeConnection,passiveConnection)
+					passiveConnection.close()
 					
 			elif ftpCommand=="RETR":
 				if ftpCommand==ftpData:
@@ -411,18 +562,29 @@ def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 					#ftpData = ftpData.split('\\')
 					#ftpData = ftpData[-1]
 					indexLastElement = request.rfind('\\')
-					ftpData = request[indexLastElement+1:]
+					if indexLastElement != -1:
+						ftpData = request[indexLastElement+1:]
+					else:
+						ftpData = (ftpData.strip('/')).strip('\\')
+					#EndElse
 					path = WorkingDirectory+"\\"+ftpData
 					print("path: "+path)
-					UploadFile(path,commandSocket,NewConnection)
+					UploadFile(dataMODE,path,commandSocket,activeConnection,passiveConnection)
 					#commandSocket.send("\r\n".encode())
-					NewConnection.close()
+					passiveConnection.close()
 					
 			elif ftpCommand=="TYPE":
 				if ftpCommand==ftpData:
 					message = syntexError()
 					commandSocket.send(message.encode())
 				else:
+					ftpData = ftpData.rstrip()
+					if ftpData.upper() == "I":
+						fileMODE = 'rb'
+					elif ftpData.upper() == "A": 
+						fileMODE = 'r'
+					#endIf
+					
 					message = "200 Ok the "+ftpData+" Type has been selected.\r\n"
 					commandSocket.send(message.encode())
 					
@@ -430,11 +592,8 @@ def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 				if ftpCommand==ftpData:
 					message = syntexError()
 					commandSocket.send(message.encode())
-				else:
-					data = ftpData.split('\\')
-					ftpData = data[-1]
-					ftpData = '\\'+(ftpData.strip('\\')).strip('/')
-					message,WorkingDirectory = ftp_CWD(ftpData,HomeDirectory,WorkingDirectory)
+				else:				
+					message,WorkingDirectory = ftp_CWD(ftpData,HomeDirectory,WorkingDirectory,request)
 					commandSocket.send(message.encode())
 			
 			elif ftpCommand=="PWD":
@@ -446,11 +605,11 @@ def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 				commandSocket.send(message.encode())
 				message = ftp_NLST(WorkingDirectory)
 				for item in message:
-					NewConnection.sendall((item+'\r\n').encode())
-				NewConnection.send(("").encode())
+					passiveConnection.sendall((item+'\r\n').encode())
+				passiveConnection.send(("").encode())
 				message = '200 Listing completed.\r\n'
 				commandSocket.send(message.encode())	
-				NewConnection.close()
+				passiveConnection.close()
 				print("Listing completed...")
 
 			elif ftpCommand=="LIST":
@@ -458,15 +617,15 @@ def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 				commandSocket.send(message.encode())
 				message = ftp_LIST(WorkingDirectory)
 				for item in message:
-					NewConnection.sendall((item+'\r\n').encode())
-				#NewConnection.send(("\r\n").encode())
+					passiveConnection.sendall((item+'\r\n').encode())
+				#passiveConnection.send(("\r\n").encode())
 				message = '200 Listing completed.\r\n'
 				commandSocket.send(message.encode())	
-				NewConnection.close()
+				passiveConnection.close()
 				print("Listing completed...")
 				
 			elif ftpCommand=="CDUP":
-				WorkingDirectory = HomeDirectory
+				WorkingDirectory = ftp_CDUP(WorkingDirectory)
 				message = ftp_PWD(HomeDirectory,WorkingDirectory)
 				commandSocket.send(message.encode())
 			
@@ -522,11 +681,12 @@ def Main():
 	commandSocket.close()
 
 if __name__ == '__main__':
+	#ftp_DEL('C:\\Users\\Ngwato\\Desktop\\4thYear\\Networks\\Project\\s.txt')
 	#results = ftp_NLIST(os.getcwd())
 	#for item in results:
 	#	print(item+'\n')
 		
 	#info = os.stat('Front.jpg')
 	#t = datetime.datetime.fromtimestamp(os.path.getmtime('Front.jpg')).strftime('%Y-%m-%d %H:%M:%S')
-	#print(str(t))
+
 	Main()
