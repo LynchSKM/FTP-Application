@@ -23,7 +23,7 @@ class clientInterface(Ui_clientUIMain):
 		#self.treeViewClientDirectory = QtWidgets.QTreeView()
 		self.treeViewClientDirectory.setModel(self.clientDirectoryModel)
 		self.treeViewClientDirectory.setRootIndex(self.clientDirectoryModel.setRootPath(QtCore.QDir.rootPath()))
-		
+		self.pathSelectedItem = QtCore.QDir.rootPath()
 		#====================== End Tree View ========================
 		
 		
@@ -32,11 +32,18 @@ class clientInterface(Ui_clientUIMain):
 		#====================== End Table View ========================
 		
 		
-		#=============== Connect Buttons to Functions =================
+		#=============== Connect Widgets to Functions =================
 		# Connect push buttons clicked action to respective functions:
 		self.pushButtonLogin.clicked.connect(self.pushButtonLoginClicked)
 		self.pushButtonLogout.clicked.connect(self.pushButtonLogoutClicked)
-		self.pushButtonParentDirectory.clicked.connect(self.pushButtonParentDirectoryClicked)
+		self.pushButtonRootDirectory.clicked.connect(self.pushButtonRootDirectoryClicked)
+		self.pushButtonUpload.clicked.connect(self.pushButtonUploadClicked)
+		self.pushButtonDownload.clicked.connect(self.pushButtonDownloadClicked)
+		self.pushButtonCreateDirectory.clicked.connect(self.pushButtonCreateDirectoryClicked)
+		self.pushButtonDeleteDirectory.clicked.connect(self.pushButtonDeleteDirectoryClicked)
+		
+		self.treeViewClientDirectory.clicked.connect(self.treeViewClientDirectoryClicked)
+		self.tableWidgetServerDirectory.doubleClicked.connect(self.getSelectedItem)
 		
 		#==============================================================
 		
@@ -46,15 +53,13 @@ class clientInterface(Ui_clientUIMain):
 		password	   = self.lineEditPassword.text()
 		
 		# Login:
-		hostServerName = 'ELEN4017.ug.eie.wits.ac.za'
+		hostServerName = 'Julius-HP'
 		username = 'group6'
 		password = 'reiph9Ju'
 		try:
-			#tLogin = threading.Thread(target=self.ftpClient.login, args=(hostServerName, username))
-			#tLogin.start()
 			self.ftpClient.login(hostServerName, username, password)
 			self.pushButtonLogout.setEnabled(True)
-			self.pushButtonParentDirectoryClicked()
+			self.pushButtonRootDirectoryClicked()
 			self.labelStatus.setText('Login successful.')
 		except:
 			self.labelStatus.setText('Login unsuccessful.')
@@ -73,10 +78,11 @@ class clientInterface(Ui_clientUIMain):
 	
 	def updateServerDirectoryWidget(self):
 		try:
+			self.tableWidgetServerDirectory.setRowCount(0)
 			listOfFilesInDirectory = self.ftpClient.updateDirectoryList()
 			
 			# set column count
-			self.tableWidgetServerDirectory.setColumnCount(len(listOfFilesInDirectory[0]))
+			self.tableWidgetServerDirectory.setColumnCount(4)
 			
 			# Set Row Count:
 			self.tableWidgetServerDirectory.setRowCount(len(listOfFilesInDirectory)+1)
@@ -97,16 +103,113 @@ class clientInterface(Ui_clientUIMain):
 			self.tableWidgetServerDirectory.setHorizontalHeaderItem(2, QtWidgets.QTableWidgetItem("Last Modified"))
 			self.tableWidgetServerDirectory.setHorizontalHeaderItem(3, QtWidgets.QTableWidgetItem("Permissions"))
 		except:
-			labelStatus.setText('Unable to update Server Directory.')
-			
-	def pushButtonParentDirectoryClicked(self):
+			self.labelStatus.setText('Unable to update Server Directory.')
+	
+	
+	def parentDirectoryClicked(self):
 		try:
-			#self.ftpClient.changeToParentDirectory()
-			self.ftpClient.changeWorkingDirectory('/files')
+			self.ftpClient.changeToParentDirectory()
 			self.updateServerDirectoryWidget()
 			self.labelStatus.setText('Directory successfully changed to Parent Directory!')
 		except:
 			self.labelStatus.setText('Unable to change to Parent Directory!')
+	
+	def pushButtonRootDirectoryClicked(self):
+		try:
+			self.ftpClient.changeToRootDirectory()
+			self.updateServerDirectoryWidget()
+			self.labelStatus.setText('Directory successfully changed to Root Directory!')
+		except:
+			self.labelStatus.setText('Unable to change to Root Directory!')
+	
+	def changeWorkingDirectoryClicked(self, pathName):
+		try:
+			self.ftpClient.changeWorkingDirectory(pathName)
+			self.updateServerDirectoryWidget()
+			self.labelStatus.setText('Directory successfully changed!')
+		except:
+			self.labelStatus.setText('Unable to change Directory!')
+	
+	def pushButtonCreateDirectoryClicked(self):
+		try:
+			folderName = self.lineEditNewDirectory.text()
+			if folderName!='':
+				self.ftpClient.createDirectory(folderName)
+				self.updateServerDirectoryWidget()
+				
+				self.labelStatus.setText('New directory created!')
+		except:
+			self.labelStatus.setText('Unable to create directory!')
+	
+	
+	def pushButtonDeleteDirectoryClicked(self):
+		try:
+			for currentQTableWidgetRow in self.tableWidgetServerDirectory.selectionModel().selectedRows():
+				if currentQTableWidgetRow.row()!=0:
+					filename = self.tableWidgetServerDirectory.item(currentQTableWidgetRow.row(), 0).text()
+					self.ftpClient.deleteDirectory(filename)
+					
+			self.updateServerDirectoryWidget()
+			self.labelStatus.setText('Directory deleted!')
+		except:
+			self.labelStatus.setText('Unable to delete directory!')
+	
+	def treeViewClientDirectoryClicked(self, signal):
+		self.pathSelectedItem = self.treeViewClientDirectory.model().filePath(signal)
+		#print(self.pathSelectedItem)
+		
+	def pushButtonUploadClicked(self):
+		try:
+			# Check if selected item is not a folder:
+			fileUpload = self.pathSelectedItem
+			if not os.path.isdir(fileUpload) and os.path.exists(fileUpload):
+				temp = fileUpload.rsplit('/')
+				self.currentDirectory = temp[0]
+				selectedFile = temp[1]
+				self.ftpClient.upload(selectedFile, self.currentDirectory)
+				self.labelUploadStatus.setText('File upload complete.')
+				self.updateServerDirectoryWidget()
+			else:
+				self.labelUploadStatus.setText('Cannot upload folders!')
+		except:
+			self.labelUploadStatus.setText('Upload failed.')
+	
+	def getSelectedItem(self):
+		try:
+			for currentQTableWidgetRow in self.tableWidgetServerDirectory.selectionModel().selectedRows():
+				if currentQTableWidgetRow.row()!=0:
+					self.pushButtonDownloadClicked()
+				else:
+					self.parentDirectoryClicked()
+		except:
+			self.labelDownloadStatus.setText('Cannot select file/folder.')
+	
+	def pushButtonDownloadClicked(self):
+		try:
+			
+			# Check selected table item:
+			for currentQTableWidgetRow in self.tableWidgetServerDirectory.selectionModel().selectedRows():
+				if currentQTableWidgetRow.row()!=0:
+					filename = self.tableWidgetServerDirectory.item(currentQTableWidgetRow.row(), 0).text()
+
+					filePermissions = self.tableWidgetServerDirectory.item(currentQTableWidgetRow.row(), 3).text()
+					
+					if filePermissions.find('x') is -1:
+						temp = self.pathSelectedItem.rsplit('/')
+						currentDirectory = temp[0]
+						self.saveFileInDirectory = str(QtWidgets.QFileDialog.getExistingDirectory(None, "Save File In Directory", currentDirectory,\
+						QtWidgets.QFileDialog.ShowDirsOnly))
+						
+						# Download and save the file:
+						self.labelDownloadStatus.setText('Downloading...')
+						self.ftpClient.download(filename, self.saveFileInDirectory)
+						self.labelDownloadStatus.setText('Download complete.')
+					else:
+						self.changeWorkingDirectoryClicked(filename)
+
+		except:
+			# Download failed:
+			self.labelDownloadStatus.setText('Download failed.')
 #------------------- END INTERFACE-------------------------
 
 class clientProtocolInterpreter():
@@ -115,6 +218,7 @@ class clientProtocolInterpreter():
 		self.tcpControlConnectionPort = 21
 		self.bufferSize = bufferSize
 		self.listInDirectory = []
+		self.rootDirectory = ''
 	def initializeFTPConnection(self, serverName):
 		'''
 			initializeFTPConnection creates the TCP control connection
@@ -160,8 +264,7 @@ class clientProtocolInterpreter():
 		# Start at Parent Working Directory:
 		self.changeToParentDirectory()
 		# Obtain current working directory:
-		self.currentWorkingDirectory = self.printWorkingDirectory()
-	
+		self.rootDirectory = self.printWorkingDirectory()
 	#------------------------------------------------------------	
 	def sendCommand(self, command="NOOP", message=""):
 		'''
@@ -197,6 +300,14 @@ class clientProtocolInterpreter():
 		self.getServerResponse()
 	
 	#------------------------------------------------------------
+	def changeToRootDirectory(self):
+		'''
+			changeToRootDirectory changes the working directory on the 
+			FTP Server to the Root Directory.
+		'''
+		self.changeWorkingDirectory(self.rootDirectory)
+	
+	#------------------------------------------------------------
 	def changeToParentDirectory(self):
 		'''
 			changeToParentDirectory changes the working directory on the FTP Server
@@ -214,14 +325,13 @@ class clientProtocolInterpreter():
 		# Obtain current working directory:
 		self.sendCommand('PWD')
 		response = self.getServerResponse()
-		activeDirectory = response[1]
+		self.activeDirectory = response[1]
 		
 		indexFirstElement 	   = response[1].find('"')
 		indexLastElement  	   = response[1].rfind('"')
-		self.activeDirectory   = activeDirectory[indexFirstElement+1:indexLastElement]
-		
-		# Update list of files or folders:
-		#listFilesInWorkingDirectory(tcpControlSocket)
+	
+		if indexFirstElement!=-1 and indexLastElement!=-1:
+			self.activeDirectory   = self.activeDirectory[indexFirstElement+1:indexLastElement]
 		
 		return self.activeDirectory
 	#------------------------------------------------------------
@@ -234,7 +344,8 @@ class clientProtocolInterpreter():
 		'''
 		# Get current directory:
 		currentDirectory = self.printWorkingDirectory()
-		newPathName = os.path.join(currentDirectory, newPathName)
+		if currentDirectory!=self.rootDirectory:
+			newPathName = os.path.join(currentDirectory, newPathName)
 		
 		# Change working directory:
 		self.sendCommand('CWD', newPathName)
@@ -250,8 +361,8 @@ class clientProtocolInterpreter():
 		'''
 		# Get current directory:
 		currentDirectory = self.printWorkingDirectory()
-		newDirectoryName = os.path.join(currentDirectory,newDirectoryName)
-		
+		newDirectoryName = os.path.join(currentDirectory, newDirectoryName)
+		print(newDirectoryName)
 		# Make the directory:
 		self.sendCommand('MKD', newDirectoryName)
 		self.getServerResponse()
@@ -264,6 +375,10 @@ class clientProtocolInterpreter():
 			The client will delete a directory in the current working directory and the function
 			will then request an updated list of the items in the directory.
 		'''
+		# Get current directory:
+		currentDirectory = self.printWorkingDirectory()
+		directoryName = os.path.join(currentDirectory, directoryName)
+		
 		self.sendCommand('DELE', directoryName)
 		self.getServerResponse()
 		
@@ -289,7 +404,7 @@ class clientProtocolInterpreter():
 		self.listInDirectory.append(tempList)
 	
 	#------------------------------------------------------------
-	def listFilesInWorkingDirectory(self, clientDTP, pathName="", command='LIST'):
+	def listFilesInWorkingDirectory(self, clientDTP, pathName=""):
 		'''
 			listFilesInWorkingDirectory is responsible for retrieving the 
 			list of files in the specified pathName.
@@ -301,12 +416,12 @@ class clientProtocolInterpreter():
 		print("============= GETTING LIST ================")
 		dataConnectionSocket = clientDTP.createPassiveConnection(self)
 		
-		self.sendCommand(command, pathName)
+		self.sendCommand('LIST', pathName)
 		response = self.getServerResponse()
 
 		dataList = dataConnectionSocket.recv(self.bufferSize).decode().rstrip()
 		print("Receiving List of Directory "+pathName+" ...")
-
+		self.listInDirectory = []
 		while dataList:
 			
 			tempDataList = dataList.split('\r')
@@ -581,9 +696,16 @@ class FTPClient():
 		self.clientPI.initializeFTPConnection(hostname)
 		self.clientPI.doLogin(username, password)
 	
+	def changeToRootDirectory(self):
+		'''
+			changeToRootDirectory tell the Client PI to change to 
+			the Root Directory.
+		'''
+		self.clientPI.changeToRootDirectory()
+	
 	def changeToParentDirectory(self):
 		'''
-			changeToParentDirectory will request the server to change to 
+			changeToParentDirectory will tell the Client PI to change to 
 			the Parent Directory.
 		'''
 		self.clientPI.changeToParentDirectory()
