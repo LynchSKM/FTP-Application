@@ -276,10 +276,10 @@ def ftp_MakeDir(directory):
 #End Function
 	
 def ftp_Size(directory):
-	valid = os.path.isdir(directory)
+	valid = os.path.exists(directory)
 	if valid:
 		fileSize = os.path.getsize(directory)
-		response = "213" + str(fileSize)+" \r\n"
+		response = "213 " + str(fileSize)+"\r\n"
 	else:
 		response = "450 directory not found.\r\n"
 	#End_If
@@ -381,10 +381,14 @@ def PORT(data):
 	message = "220 Entering Active Connection...\r\n"
 	return clientSocket,message
 	
-def ftp_CDUP(CurrentDir):
-	lastIndex = CurrentDir.rfind('\\')
-	newDir = CurrentDir[:lastIndex]
-	return newDir
+def ftp_CDUP(CurrentDir,HomeDir):
+	if CurrentDir == HomeDir:
+		return HomeDir
+	else:
+		lastIndex = CurrentDir.rfind('\\')
+		newDir = CurrentDir[:lastIndex]
+		return newDir
+	
 def ftp_PWD(homeDir,currDir):
 	print('Home Dir: '+homeDir)
 	print('Current Dir: '+currDir)
@@ -461,7 +465,8 @@ def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 			request  = (commandSocket.recv(bufferSize).decode()).rstrip()
 			while not request:
 				request  = (commandSocket.recv(bufferSize).decode()).rstrip()
-
+			
+			print("==============================================================================")
 			command  = request.split(' ', 1)
 			print('\n\n'+clientIP+" "+request)
 			ftpCommand  = (command[0].rstrip()).upper()
@@ -518,8 +523,8 @@ def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 					filePath = WorkingDirectory+"\\"+ftpData
 					print("path: "+filePath)
 					
-					message = "200 Okay deleting a Folder.\r\n"
-					commandSocket.send(message.encode())
+					#message = "200 Okay deleting a Folder.\r\n"
+					#commandSocket.send(message.encode())
 					#filePath = os.path.join(HomeDirectory,ftpData)
 					message  = ftp_DEL(filePath)
 					commandSocket.send(message.encode())					
@@ -625,7 +630,7 @@ def ClientHandler(DataBase,clientIP,commandSocket,dataSocket):
 				print("Listing completed...")
 				
 			elif ftpCommand=="CDUP":
-				WorkingDirectory = ftp_CDUP(WorkingDirectory)
+				WorkingDirectory = ftp_CDUP(WorkingDirectory,HomeDirectory)
 				message = ftp_PWD(HomeDirectory,WorkingDirectory)
 				commandSocket.send(message.encode())
 			
