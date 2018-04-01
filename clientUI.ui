@@ -90,6 +90,9 @@
        <height>21</height>
       </rect>
      </property>
+     <property name="text">
+      <string>ELEN4017.ug.eie.wits.ac.za</string>
+     </property>
     </widget>
     <widget class="QLineEdit" name="lineEditUsername">
      <property name="geometry">
@@ -99,6 +102,9 @@
        <width>171</width>
        <height>21</height>
       </rect>
+     </property>
+     <property name="text">
+      <string>group6</string>
      </property>
     </widget>
     <widget class="QLineEdit" name="lineEditPassword">
@@ -229,7 +235,7 @@
        <x>20</x>
        <y>10</y>
        <width>401</width>
-       <height>431</height>
+       <height>381</height>
       </rect>
      </property>
      <property name="font">
@@ -305,7 +311,7 @@
      <property name="geometry">
       <rect>
        <x>20</x>
-       <y>450</y>
+       <y>410</y>
        <width>201</width>
        <height>41</height>
       </rect>
@@ -325,7 +331,7 @@
       <rect>
        <x>450</x>
        <y>450</y>
-       <width>171</width>
+       <width>181</width>
        <height>41</height>
       </rect>
      </property>
@@ -367,7 +373,7 @@
       <rect>
        <x>20</x>
        <y>510</y>
-       <width>321</width>
+       <width>411</width>
        <height>21</height>
       </rect>
      </property>
@@ -378,9 +384,9 @@
     <widget class="QLabel" name="labelUploadStatus">
      <property name="geometry">
       <rect>
-       <x>250</x>
+       <x>20</x>
        <y>460</y>
-       <width>171</width>
+       <width>241</width>
        <height>21</height>
       </rect>
      </property>
@@ -391,14 +397,43 @@
     <widget class="QLabel" name="labelDownloadStatus">
      <property name="geometry">
       <rect>
-       <x>660</x>
-       <y>460</y>
-       <width>161</width>
+       <x>450</x>
+       <y>500</y>
+       <width>211</width>
        <height>21</height>
       </rect>
      </property>
      <property name="text">
       <string/>
+     </property>
+    </widget>
+    <widget class="QProgressBar" name="progressBarUpload">
+     <property name="geometry">
+      <rect>
+       <x>280</x>
+       <y>460</y>
+       <width>141</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="value">
+      <number>0</number>
+     </property>
+     <property name="textVisible">
+      <bool>true</bool>
+     </property>
+    </widget>
+    <widget class="QProgressBar" name="progressBarDownload">
+     <property name="geometry">
+      <rect>
+       <x>680</x>
+       <y>500</y>
+       <width>141</width>
+       <height>23</height>
+      </rect>
+     </property>
+     <property name="value">
+      <number>0</number>
      </property>
     </widget>
    </widget>
@@ -417,17 +452,21 @@
    <property name="whatsThis">
     <string>File</string>
    </property>
-   <widget class="QMenu" name="menu_File">
+   <widget class="QMenu" name="menu_file">
     <property name="title">
      <string>&amp;File</string>
     </property>
-    <addaction name="separator"/>
-    <addaction name="action_Exit"/>
+    <addaction name="action_Exit_2"/>
    </widget>
-   <addaction name="menu_File"/>
+   <addaction name="menu_file"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="action_Exit">
+   <property name="text">
+    <string>&amp;Exit</string>
+   </property>
+  </action>
+  <action name="action_Exit_2">
    <property name="text">
     <string>&amp;Exit</string>
    </property>

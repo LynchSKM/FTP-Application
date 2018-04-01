@@ -2,9 +2,78 @@ import socket
 import threading
 import sys
 import os
+import time
+import traceback
 
 from PyQt5 import QtCore, QtGui, QtWidgets  #QDir, Qt
 from clientUI import Ui_clientUIMain
+
+commandLock  = threading.Lock()
+BUSYFILES = []
+#----------------------------------------------------------
+class workerThreadSignals(QtCore.QObject):
+    '''
+    Defines the signals available from a running worker thread.
+
+    Supported signals are:
+
+    finished
+        No data
+
+    error
+        `tuple` (exctype, value, traceback.format_exc() )
+		
+    progress
+        `int` indicating % progress of file download or upload:
+
+    '''
+    finished = QtCore.pyqtSignal()
+    error = QtCore.pyqtSignal(tuple)
+    fileProgress = QtCore.pyqtSignal()
+	
+class workerThread(QtCore.QRunnable):
+    '''
+    workerThread Worker thread
+
+    Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
+
+    :param callback: The function callback to run on this worker thread. Supplied args and 
+                     kwargs will be passed through to the runner.
+    :type callback: function
+    :param args: Arguments to pass to the callback function
+    :param kwargs: Keywords to pass to the callback function
+
+    '''
+
+    def __init__(self, fn, *args, **kwargs):
+        super(workerThread, self).__init__()
+
+        # Store constructor arguments (re-used for processing)
+        self.functionToProcess = fn
+        self.args = args
+        
+        self.signals = workerThreadSignals()
+		# Add the callback to our kwargs
+        kwargs['progress_callback'] = self.signals.fileProgress
+        self.kwargs = kwargs
+
+    @QtCore.pyqtSlot()
+    def run(self):
+        '''
+        Initialise the runner function with passed args, kwargs.
+        '''
+
+        # Get args/kwargs here; and start processing 
+        try:
+
+            self.functionToProcess(*self.args, **self.kwargs)
+        except:
+            traceback.print_exc()
+            exctype, value = sys.exc_info()[:2]
+            self.signals.error.emit((exctype, value, traceback.format_exc()))
+        finally:
+            self.signals.finished.emit()  # Complete
+			
 #---------------------- INTERFACE -------------------------
 class clientInterface(Ui_clientUIMain):
 	def __init__(self, ftpClientUIMain, ftpClient):
@@ -14,6 +83,9 @@ class clientInterface(Ui_clientUIMain):
 		
 		self.pushButtonLogout.setEnabled(False)
 		
+		self.progressBarUpload.hide()
+		self.progressBarDownload.hide()
+		self.threadpool = QtCore.QThreadPool()
 		#==================== Tree View (Model based) ==============================
 		# Set up tree view for client directory:
 		self.clientDirectoryModel = QtWidgets.QFileSystemModel()
@@ -24,12 +96,8 @@ class clientInterface(Ui_clientUIMain):
 		self.treeViewClientDirectory.setModel(self.clientDirectoryModel)
 		self.treeViewClientDirectory.setRootIndex(self.clientDirectoryModel.setRootPath(QtCore.QDir.rootPath()))
 		self.pathSelectedItem = QtCore.QDir.rootPath()
+		self.treeViewClientDirectory.header().resizeSection(0, 300)
 		#====================== End Tree View ========================
-		
-		
-		#================== Table View (Item based) ==================
-		
-		#====================== End Table View ========================
 		
 		
 		#=============== Connect Widgets to Functions =================
@@ -44,42 +112,58 @@ class clientInterface(Ui_clientUIMain):
 		
 		self.treeViewClientDirectory.clicked.connect(self.treeViewClientDirectoryClicked)
 		self.tableWidgetServerDirectory.doubleClicked.connect(self.getSelectedItem)
-		
+		# exit action
+		self.action_Exit.toggled.connect(self.actionExitApp)
+		self.action_Exit.triggered.connect(self.actionExitApp)
+		self.action_Exit_2.toggled.connect(self.actionExitApp)
+		self.action_Exit_2.triggered.connect(self.actionExitApp)
+	
+        #self.menu_Exit.triggered.connect()
 		#==============================================================
+	def loginSuccessful(self):
+		try:
+			self.pushButtonRootDirectoryClicked()
+			self.pushButtonLogout.setEnabled(True)
+			
+			self.labelStatus.setText('Login successful.')
+			self.treeViewClientDirectory.setEnabled(True)
+		except:
+			pass
 		
+	
 	def pushButtonLoginClicked(self):
 		hostServerName = self.lineEditHostName.text()
 		username 	   = self.lineEditUsername.text()
 		password	   = self.lineEditPassword.text()
-		
+		self.labelStatus.setText('Not Logged into any server.')
 		# Login:
-		hostServerName = 'Julius-HP'
-		username = 'group6'
-		password = 'reiph9Ju'
+		#hostServerName = 'ELEN4017.ug.eie.wits.ac.za'
+		#username = 'group6'
+		#password = 'reiph9Ju'
 		try:
-			self.ftpClient.login(hostServerName, username, password)
-			self.pushButtonLogout.setEnabled(True)
-			self.pushButtonRootDirectoryClicked()
-			self.labelStatus.setText('Login successful.')
+			
+			loginWorker = workerThread(self.ftpClient.login, hostServerName, username, password)
+			loginWorker.signals.finished.connect(self.loginSuccessful)
+			self.threadpool.start(loginWorker)
 		except:
-			self.labelStatus.setText('Login unsuccessful.')
-	
+			pass
+			
 	def pushButtonLogoutClicked(self):
 		# Logout:
 		try:
-			#tLogin = threading.Thread(target=self.ftpClient.login, args=(hostServerName, username))
-			#tLogin.start()
-			self.ftpClient.logout()
-			self.pushButtonLogout.setEnabled(False)
-			self.tableWidgetServerDirectory.setRowCount(0) 
-			self.labelStatus.setText('Logout successful.')
+			if not BUSYFILES:
+				self.ftpClient.logout()
+				self.pushButtonLogout.setEnabled(False)
+				self.tableWidgetServerDirectory.setRowCount(0) 
+				self.labelStatus.setText('Logout successful.')
+			else:
+				self.labelStatus.setText('Cannot Logout. Busy '+BUSYFILES[0][1])
 		except:
 			self.labelStatus.setText('Logout unsuccessful.')
 	
-	def updateServerDirectoryWidget(self):
+	def updateServerDirectoryWidget(self, listOfFilesInDirectory):
 		try:
 			self.tableWidgetServerDirectory.setRowCount(0)
-			listOfFilesInDirectory = self.ftpClient.updateDirectoryList()
 			
 			# set column count
 			self.tableWidgetServerDirectory.setColumnCount(4)
@@ -88,12 +172,27 @@ class clientInterface(Ui_clientUIMain):
 			self.tableWidgetServerDirectory.setRowCount(len(listOfFilesInDirectory)+1)
 			# Default:
 			self.tableWidgetServerDirectory.setItem(0,0, QtWidgets.QTableWidgetItem(".."))
+			self.tableWidgetServerDirectory.setColumnWidth(0, 200)
 			
 			row = 1
 			col = 0
 			for item in listOfFilesInDirectory:
 				for fileProperty in item:
-					self.tableWidgetServerDirectory.setItem(row,col, QtWidgets.QTableWidgetItem(fileProperty))
+					fileTypeIco = None
+					if col==0:
+						if item[3].find('x') is -1:
+							tempFilename = fileProperty.lower()
+							if tempFilename.endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
+								fileTypeIco = "assets/image.png"
+							elif tempFilename.endswith(('.mp4', '.wmv', '.mkv', '.avi')):
+								fileTypeIco = "assets/video.ico"
+							else:
+								fileTypeIco = "assets/file.ico"
+						else:
+							fileTypeIco = "assets/folder.ico"
+					
+					tempItem = QtWidgets.QTableWidgetItem(QtGui.QIcon(QtGui.QPixmap(fileTypeIco)), fileProperty)
+					self.tableWidgetServerDirectory.setItem(row,col, tempItem)
 					col = col+1
 				row = row+1
 				col = 0
@@ -108,67 +207,101 @@ class clientInterface(Ui_clientUIMain):
 	
 	def parentDirectoryClicked(self):
 		try:
-			self.ftpClient.changeToParentDirectory()
-			self.updateServerDirectoryWidget()
-			self.labelStatus.setText('Directory successfully changed to Parent Directory!')
+			if not BUSYFILES:
+				self.ftpClient.changeToParentDirectory()
+				updatedList = self.ftpClient.updateDirectoryList()
+				self.updateServerDirectoryWidget(updatedList)
+				self.labelStatus.setText('Directory successfully changed to Parent Directory!')
+			else:
+				self.labelStatus.setText('Cannot change to parent directory. Busy '+BUSYFILES[0][1])
 		except:
 			self.labelStatus.setText('Unable to change to Parent Directory!')
 	
 	def pushButtonRootDirectoryClicked(self):
 		try:
-			self.ftpClient.changeToRootDirectory()
-			self.updateServerDirectoryWidget()
-			self.labelStatus.setText('Directory successfully changed to Root Directory!')
+			if not BUSYFILES:
+				self.ftpClient.changeToRootDirectory()
+				
+				updatedList = self.ftpClient.updateDirectoryList()
+				self.updateServerDirectoryWidget(updatedList)
+				
+				self.labelStatus.setText('Directory successfully changed to Root Directory!')
+			else:
+				self.labelStatus.setText('Cannot change to root directory. Busy '+BUSYFILES[0][1])
 		except:
 			self.labelStatus.setText('Unable to change to Root Directory!')
 	
 	def changeWorkingDirectoryClicked(self, pathName):
 		try:
-			self.ftpClient.changeWorkingDirectory(pathName)
-			self.updateServerDirectoryWidget()
-			self.labelStatus.setText('Directory successfully changed!')
+			if not BUSYFILES:
+				self.ftpClient.changeWorkingDirectory(pathName)
+				
+				updatedList = self.ftpClient.updateDirectoryList()
+				self.updateServerDirectoryWidget(updatedList)
+				
+				self.labelStatus.setText('Directory successfully changed!')
+			else:
+				self.labelStatus.setText('Cannot delete. Busy '+BUSYFILES[0][1])
 		except:
 			self.labelStatus.setText('Unable to change Directory!')
 	
 	def pushButtonCreateDirectoryClicked(self):
 		try:
-			folderName = self.lineEditNewDirectory.text()
-			if folderName!='':
-				self.ftpClient.createDirectory(folderName)
-				self.updateServerDirectoryWidget()
-				
-				self.labelStatus.setText('New directory created!')
+			if not BUSYFILES:
+				folderName = self.lineEditNewDirectory.text()
+				if folderName!='':
+					self.ftpClient.createDirectory(folderName)
+					
+					updatedList = self.ftpClient.updateDirectoryList()
+					self.updateServerDirectoryWidget(updatedList)
+					
+					self.labelStatus.setText('New directory created!')
+			else:
+				self.labelStatus.setText('Cannot create directory. Busy '+BUSYFILES[0][1])
 		except:
 			self.labelStatus.setText('Unable to create directory!')
 	
 	
 	def pushButtonDeleteDirectoryClicked(self):
 		try:
-			for currentQTableWidgetRow in self.tableWidgetServerDirectory.selectionModel().selectedRows():
-				if currentQTableWidgetRow.row()!=0:
-					filename = self.tableWidgetServerDirectory.item(currentQTableWidgetRow.row(), 0).text()
-					self.ftpClient.deleteDirectory(filename)
-					
-			self.updateServerDirectoryWidget()
-			self.labelStatus.setText('Directory deleted!')
+			if not BUSYFILES:
+				for currentQTableWidgetRow in self.tableWidgetServerDirectory.selectionModel().selectedRows():
+					if currentQTableWidgetRow.row()!=0:
+						filename = self.tableWidgetServerDirectory.item(currentQTableWidgetRow.row(), 0).text()
+						self.ftpClient.deleteDirectory(filename)
+						
+				updatedList = self.ftpClient.updateDirectoryList()
+				self.updateServerDirectoryWidget(updatedList)
+			else:
+				self.labelStatus.setText('Cannot delete. Busy '+BUSYFILES[0][1])
+			
 		except:
 			self.labelStatus.setText('Unable to delete directory!')
 	
 	def treeViewClientDirectoryClicked(self, signal):
 		self.pathSelectedItem = self.treeViewClientDirectory.model().filePath(signal)
-		#print(self.pathSelectedItem)
+		
+		print(self.pathSelectedItem)
 		
 	def pushButtonUploadClicked(self):
 		try:
 			# Check if selected item is not a folder:
 			fileUpload = self.pathSelectedItem
+			print(fileUpload)
 			if not os.path.isdir(fileUpload) and os.path.exists(fileUpload):
-				temp = fileUpload.rsplit('/')
-				self.currentDirectory = temp[0]
-				selectedFile = temp[1]
-				self.ftpClient.upload(selectedFile, self.currentDirectory)
-				self.labelUploadStatus.setText('File upload complete.')
-				self.updateServerDirectoryWidget()
+				lastIndex = fileUpload.rfind('/')
+				self.currentDirectory = fileUpload[0:lastIndex]
+				print("Where to get file: "+self.currentDirectory)
+				selectedFile = fileUpload[lastIndex+1:]
+				print('The file selected: '+selectedFile)
+				
+				# Pass the download for execution;
+				uploadWorker = workerThread(self.ftpClient.upload, selectedFile, self.currentDirectory)
+				uploadWorker.signals.finished.connect(self.uploadDownloadthreadComplete)
+				uploadWorker.signals.fileProgress.connect(self.updateProgressBars)
+				# Execute thread:
+				self.threadpool.start(uploadWorker)
+				
 			else:
 				self.labelUploadStatus.setText('Cannot upload folders!')
 		except:
@@ -197,27 +330,69 @@ class clientInterface(Ui_clientUIMain):
 					if filePermissions.find('x') is -1:
 						temp = self.pathSelectedItem.rsplit('/')
 						currentDirectory = temp[0]
-						self.saveFileInDirectory = str(QtWidgets.QFileDialog.getExistingDirectory(None, "Save File In Directory", currentDirectory,\
-						QtWidgets.QFileDialog.ShowDirsOnly))
-						
-						# Download and save the file:
-						self.labelDownloadStatus.setText('Downloading...')
-						self.ftpClient.download(filename, self.saveFileInDirectory)
-						self.labelDownloadStatus.setText('Download complete.')
+						try:
+							self.saveFileInDirectory = str(QtWidgets.QFileDialog.getExistingDirectory(None, "Save File In Directory", currentDirectory,\
+							QtWidgets.QFileDialog.ShowDirsOnly))
+							
+							# Download and save the file:
+
+							# Pass the download for execution;
+							downloadWorker = workerThread(self.ftpClient.download, filename, self.saveFileInDirectory)
+							downloadWorker.signals.finished.connect(self.uploadDownloadthreadComplete)
+							downloadWorker.signals.fileProgress.connect(self.updateProgressBars)
+							# Execute thread:
+							self.threadpool.start(downloadWorker)
+						except:
+							self.ftpClient.checkServerStatus()
+							self.tableWidgetServerDirectory.setEnabled(True)
 					else:
 						self.changeWorkingDirectoryClicked(filename)
 
 		except:
 			# Download failed:
 			self.labelDownloadStatus.setText('Download failed.')
-#------------------- END INTERFACE-------------------------
 
+	def uploadDownloadthreadComplete(self):
+		self.updateServerDirectoryWidget(self.ftpClient.listOfFiles)
+		
+		self.progressBarUpload.hide()
+		self.labelDownloadStatus.setText('')
+		self.labelUploadStatus.setText('')
+		self.progressBarDownload.hide()
+		self.tableWidgetServerDirectory.setEnabled(True)
+	def updateProgressBars(self):
+		if BUSYFILES[0][1].upper()=='DOWNLOADING':
+			self.progressBarDownload.show()
+			self.labelDownloadStatus.setText('Downloading '+BUSYFILES[0][0])
+			self.progressBarDownload.setValue(BUSYFILES[0][2])
+		else:
+			self.progressBarUpload.show()
+			self.labelUploadStatus.setText('Uploading '+BUSYFILES[0][0])
+			self.progressBarUpload.setValue(BUSYFILES[0][2])
+	
+	def actionExitApp(self):
+		try:
+			
+			self.terminateConnection()
+		except:
+			pass
+	def terminateConnection(self):
+		try:
+			if not BUSYFILES:
+				self.ftpClient.terminateConnection()
+				self.labelStatus.setText('Disconnect from Server.')
+			else:
+				self.labelStatus.setText('Cannot delete. Busy '+BUSYFILES[0][1])
+		except:
+			self.labelStatus.setText('Disconnect failed.')
+#------------------- END INTERFACE-------------------------
+	
 class clientProtocolInterpreter():
 	def __init__(self, bufferSize=8192):
 		# Port number being used for TCP Control Connection socket:
 		self.tcpControlConnectionPort = 21
 		self.bufferSize = bufferSize
-		self.listInDirectory = []
+		self.listOfFiles = []
 		self.rootDirectory = ''
 	def initializeFTPConnection(self, serverName):
 		'''
@@ -235,11 +410,16 @@ class clientProtocolInterpreter():
 		self.tcpControlSocket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 		
 		# Connect to the client socket to the port where the server is listening:
-		self.tcpControlSocket.connect(serverAddress)
-		
-		# Print Server Response after connecting:
-		print(self.tcpControlSocket.recv(self.bufferSize).decode())
-		print("===========================================")
+		try:
+			#
+			#self.tcpControlSocket.settimeout(5)
+			self.tcpControlSocket.connect(serverAddress)
+			
+			# Print Server Response after connecting:
+			print(self.tcpControlSocket.recv(self.bufferSize).decode())
+			print("===========================================")
+		except:
+			pass
 		
 		return self.tcpControlSocket 
 	#
@@ -300,12 +480,13 @@ class clientProtocolInterpreter():
 		self.getServerResponse()
 	
 	#------------------------------------------------------------
-	def changeToRootDirectory(self):
+	def changeToRootDirectory(self, filesep):
 		'''
 			changeToRootDirectory changes the working directory on the 
 			FTP Server to the Root Directory.
 		'''
-		self.changeWorkingDirectory(self.rootDirectory)
+		print('The Root Directory: '+self.rootDirectory)
+		self.changeWorkingDirectory(self.rootDirectory, filesep)
 	
 	#------------------------------------------------------------
 	def changeToParentDirectory(self):
@@ -335,7 +516,7 @@ class clientProtocolInterpreter():
 		
 		return self.activeDirectory
 	#------------------------------------------------------------
-	def changeWorkingDirectory(self, newPathName):
+	def changeWorkingDirectory(self, newPathName, filesep):
 		'''
 			changeWorkingDirectory implements the CWD FTP command.
 			
@@ -344,15 +525,17 @@ class clientProtocolInterpreter():
 		'''
 		# Get current directory:
 		currentDirectory = self.printWorkingDirectory()
-		if currentDirectory!=self.rootDirectory:
-			newPathName = os.path.join(currentDirectory, newPathName)
+		if newPathName!=self.rootDirectory:
 		
+			if currentDirectory!=self.rootDirectory:
+				newPathName = currentDirectory+filesep+newPathName
+				
 		# Change working directory:
 		self.sendCommand('CWD', newPathName)
 		self.getServerResponse()
 		
 	#------------------------------------------------------------
-	def makeWorkingDirectory(self, newDirectoryName):
+	def makeWorkingDirectory(self, newDirectoryName, filesep):
 		'''
 			makeWorkingDirectory implements the MKD FTP command.
 			
@@ -361,14 +544,14 @@ class clientProtocolInterpreter():
 		'''
 		# Get current directory:
 		currentDirectory = self.printWorkingDirectory()
-		newDirectoryName = os.path.join(currentDirectory, newDirectoryName)
+		newDirectoryName = currentDirectory+filesep+newDirectoryName
 		print(newDirectoryName)
 		# Make the directory:
 		self.sendCommand('MKD', newDirectoryName)
 		self.getServerResponse()
 		
 	#------------------------------------------------------------
-	def deleteDirectory(self, directoryName):
+	def deleteDirectory(self, directoryName, filesep):
 		'''
 			deleteDirectory implements the DELE FTP command.
 			
@@ -377,11 +560,12 @@ class clientProtocolInterpreter():
 		'''
 		# Get current directory:
 		currentDirectory = self.printWorkingDirectory()
-		directoryName = os.path.join(currentDirectory, directoryName)
+		directoryName = currentDirectory+filesep+directoryName
+		print('Deleting... '+directoryName)
 		
 		self.sendCommand('DELE', directoryName)
 		self.getServerResponse()
-		
+
 	#------------------------------------------------------------
 	def modifyListDetails(self, dataList):
 		'''
@@ -395,10 +579,25 @@ class clientProtocolInterpreter():
 		
 		# Split into columns:
 		temp = dataList.split()
+
+		# Select file name:
+		filename = ' '.join(temp[filenameIndex:])
 		
-		tempList = [' '.join(temp[filenameIndex:]),' '.join(temp[fileSizeIndex:fileSizeIndex+1]),\
-		' '.join(temp[fileLastModifiedIndexFirst:fileLastModifiedIndexLast]),\
-		' '.join(temp[filePermission:filePermission+1])]
+		# Select file size:
+		fileSize = float(' '.join(temp[fileSizeIndex:fileSizeIndex+1]))
+		tempFileSize = self.processFileSize(fileSize)
+		fileSize = str(tempFileSize[0])+' '+tempFileSize[1] 
+	
+		# Select last modified details:
+		lastModified = ' '.join(temp[fileLastModifiedIndexFirst:fileLastModifiedIndexLast])
+		
+		# Select permissions:
+		permissions = ' '.join(temp[filePermission:filePermission+1])
+		
+		# add to list:
+		tempList = [filename, fileSize, lastModified, permissions]
+		
+		# Remove empty fields:
 		tempList = list(filter(None, tempList))
 		
 		self.listInDirectory.append(tempList)
@@ -438,7 +637,27 @@ class clientProtocolInterpreter():
 		return self.listInDirectory
 	
 	#------------------------------------------------------------	
+	def processFileSize(self, fileSize):
+		# Response is in bytes:
+		
+		kbSize        = 1024
+		mbSize        = kbSize**2
+		newFileSize   = 0
+		sizeType	  = 'Bytes'
+		# Convert to megabytes when file is larger than a megabyte
+		if fileSize < kbSize:
+			newFileSize = fileSize
+		elif fileSize >= kbSize and fileSize < mbSize:
+			newFileSize = fileSize/kbSize
+			sizeType    = 'KB'
+		elif fileSize >= mbSize:
+			newFileSize = fileSize/mbSize
+			sizeType = 'MB'
+		
+		newFileSize = round(newFileSize,2)
+		return newFileSize, sizeType
 	
+	#------------------------------------------------------------
 	def getFileSize(self, filename):
 		'''
 			getFileSize implements FTP SIZE command.
@@ -448,15 +667,15 @@ class clientProtocolInterpreter():
 		'''
 		self.sendCommand('SIZE', filename)
 		response  = self.getServerResponse()
-		
+		fileSizeInBytes = 0
+		fileSize  = 0
 		# Response is in bytes:
-		fileSize  = float(response[1])
-		mbSize    = 1048576
-		fileSizeInMbv = 0
-		# Convert to megabytes when file is larger than a megabyte
-		if fileSize >= mbSize:
-			fileSizeInMb = fileSize/mbSize
-		return fileSize, fileSizeInMb
+		if response[0]!='450':
+			fileSizeInBytes  = float(response[1])
+			print(fileSizeInBytes)
+			fileSize  = self.processFileSize(fileSizeInBytes)
+		
+		return fileSizeInBytes, fileSize
 
 #------------------------------------------------------------
 
@@ -465,6 +684,7 @@ class clientDataTransferProcess():
 		# Port number being used for TCP Data Connection socket:
 		self.tcpDataConnectionPort = 20
 		self.bufferSize = bufferSize
+		self.listOfFiles = []
 	#------------------------------------------------------------	
 	def createPassiveConnection(self, clientPI):
 		'''
@@ -525,7 +745,7 @@ class clientDataTransferProcess():
 			the FTP Server.
 		'''
 		temp = r'\\\\'
-		pathName = pathName.replace(r'\\', temp)
+		pathName = pathName.replace(temp, r'\\')
 		indexFilePathSep = pathName.find('/')
 		if indexFilePathSep==-1:
 			filesep = r'\\'
@@ -534,14 +754,20 @@ class clientDataTransferProcess():
 		return filesep, pathName
 	
 	#------------------------------------------------------------	
-	def download(self, clientPI, file, outputPath):
+	def download(self, clientPI, file, outputPath, progress_callback=None):
 		'''
 			download is responsible for the retrieval of a file from the server.
 			The PWD command is used to obtain the current directory of focus on the server.
 			The TYPE command is sent. Upon a successful response from the command RETR the 
 			file is download to the client and saved at a user specified output path.
+
 		'''
 		print("============ DOWNLOADING ===============")
+		commandLock.acquire()
+		#progressState = []
+		fileInProcess = [file, 'DOWNLOADING', []]
+		BUSYFILES.append(fileInProcess)
+		
 		# Obtain current working directory:
 		downloadPath = clientPI.printWorkingDirectory()
 		
@@ -549,8 +775,19 @@ class clientDataTransferProcess():
 		filesep, downloadPath = self.determineServerFileSeparator(downloadPath)
 		print(downloadPath)
 		
+		# Download requested file:
+		if downloadPath=='/' or downloadPath=='\\\\' or downloadPath=='\\':
+			filesep = ''
+		filename = downloadPath+filesep+file
+		print(filename)
+		# File Size:
+		fileSize = clientPI.getFileSize(filename)
+		print(fileSize[0])
 		# Send :
-		type = 'I'
+		if file.lower().endswith(('.txt', '.cpp', '.c', '.py', '.m')):
+			type = 'ASCII'
+		else:
+			type = 'I'
 	
 		clientPI.sendCommand('TYPE', type)
 		response = clientPI.getServerResponse()
@@ -558,15 +795,11 @@ class clientDataTransferProcess():
 		# Data connection socket is opened to begin file transmission:
 		self.createPassiveConnection(clientPI)
 		
-		# Download requested file:
-		if downloadPath=='/':
-			filesep = ''
-		filename = downloadPath+filesep+file
-		
 		clientPI.sendCommand('RETR', filename)
 		response = clientPI.getServerResponse()
 		responseCode = response[1]
-
+		
+		
 		# Create file path with file name to save file on disk:
 		filesep ='/'
 		filename = outputPath+filesep+file
@@ -578,14 +811,18 @@ class clientDataTransferProcess():
 			
 		# Write file to file path:
 		try:
-			downloadedData = self.dataConnectionSocket.recv(self.bufferSize)
-
+			BUSYFILES[0][2] = 0
+			downloadedData  = self.dataConnectionSocket.recv(self.bufferSize)
+			fileProgress    = self.bufferSize 
 			with open(filename, mode) as currentDownload:
 				print("Downloading...")
 				while downloadedData:
+					BUSYFILES[0][2] = (fileProgress/fileSize[0])*100
+					if progress_callback!=None:
+						progress_callback.emit()
 					currentDownload.write(downloadedData)
 					downloadedData = self.dataConnectionSocket.recv(self.bufferSize)
-				
+					fileProgress  = fileProgress+self.bufferSize 
 				# Close the file:
 				currentDownload.close()
 				
@@ -600,12 +837,23 @@ class clientDataTransferProcess():
 			response = clientPI.getServerResponse()
 			print("========= DOWNLOADING DONE ============")
 		except:
-			print('Connection closed. Failed to download.')
+			#print('Connection closed. Failed to download.')
 			# close data connection socket:
 			self.dataConnectionSocket.close()
 			response = clientPI.getServerResponse()
+		
+		try:
+			del BUSYFILES[:]
+		except:
+			pass
+		
+		# Update List:
+		self.listOfFiles = clientPI.listFilesInWorkingDirectory(self)
+		
+		commandLock.release()
+		return self.listOfFiles
 	#------------------------------------------------------------
-	def upload(self, clientPI, file, currentDirectory=""):
+	def upload(self, clientPI, file, currentDirectory="", progress_callback=None):
 		'''
 			upload is responsible for uploading a selected file
 			to the server through the data connection socket.
@@ -614,9 +862,13 @@ class clientDataTransferProcess():
 			and then sends the TYPE command. After a successful response
 			the STOR command is sent and the selected file is uploaded.
 		'''
+		commandLock.acquire()
 		print("============== UPLOADING ==================")
 		# Obtain current working directory:
 		uploadPath = clientPI.printWorkingDirectory()
+		
+		fileInProcess = [file, 'UPLOADING', []]
+		BUSYFILES.append(fileInProcess)
 		
 		# Check file path separator:
 		filesep, uploadPath = self.determineServerFileSeparator(uploadPath)
@@ -634,7 +886,6 @@ class clientDataTransferProcess():
 		if uploadPath=='/':
 			filesep = ''
 		filename = uploadPath+filesep+file
-		print(filename)
 		print("I want to upload {}".format(filename))
 		
 		# Upload selected file:
@@ -663,12 +914,19 @@ class clientDataTransferProcess():
 			
 		# Read selected file:
 		try:
+			fileSize     = os.path.getsize(filename)
+			fileProgress = 0
+			BUSYFILES[0][2] = 0
 			with open(filename, mode) as currentUpload:
 				uploadedData = currentUpload.read(self.bufferSize)
 				print("Uploading file...")
 				while uploadedData:
+					BUSYFILES[0][2] = (fileProgress/fileSize)*100
 					self.dataConnectionSocket.send(uploadedData)
-					uploadedData = currentUpload.read(self.bufferSize)
+					if progress_callback!=None:
+						progress_callback.emit()
+					uploadedData    = currentUpload.read(self.bufferSize)
+					fileProgress    = fileProgress+self.bufferSize
 				# Close the file:
 				currentUpload.close()
 			# Done uploading:
@@ -686,28 +944,45 @@ class clientDataTransferProcess():
 			
 			# Get FTP Server Response:
 			clientPI.getServerResponse()
+			
+		try:
+			del BUSYFILES[:]
+		except:
+			pass
+		# Update List:
+		self.listOfFiles = clientPI.listFilesInWorkingDirectory(self)
+		commandLock.release()
+		return self.listOfFiles
 #------------------------------------------------------------
+
+
+
 class FTPClient():
 	def __init__(self, bufferSize=8192):
 		self.clientPI  = clientProtocolInterpreter(bufferSize)
 		self.clientDTP = clientDataTransferProcess(bufferSize)
-	
-	def login(self, hostname, username='', password=''):
-		self.clientPI.initializeFTPConnection(hostname)
-		self.clientPI.doLogin(username, password)
-	
+		self.listOfFiles = []
+	def login(self, hostname, username='', password='', progress_callback=None):
+		try:
+			self.clientPI.initializeFTPConnection(hostname)
+			self.clientPI.doLogin(username, password)
+		except:
+			pass
+			
 	def changeToRootDirectory(self):
 		'''
 			changeToRootDirectory tell the Client PI to change to 
 			the Root Directory.
 		'''
-		self.clientPI.changeToRootDirectory()
+		filesep = self.clientDTP.determineServerFileSeparator(self.clientPI.rootDirectory)
+		self.clientPI.changeToRootDirectory(filesep[0])
 	
 	def changeToParentDirectory(self):
 		'''
 			changeToParentDirectory will tell the Client PI to change to 
 			the Parent Directory.
 		'''
+
 		self.clientPI.changeToParentDirectory()
 	
 	def changeWorkingDirectory(self, pathName):
@@ -717,7 +992,8 @@ class FTPClient():
 			
 			param pathName
 		'''
-		self.clientPI.changeWorkingDirectory(pathName)
+		filesep = self.clientDTP.determineServerFileSeparator(self.clientPI.rootDirectory)
+		self.clientPI.changeWorkingDirectory(pathName,filesep[0])
 	
 	def deleteDirectory(self, directoryName):
 		'''
@@ -726,7 +1002,9 @@ class FTPClient():
 			
 			param directoryName
 		'''
-		self.clientPI.deleteDirectory(directoryName)
+		
+		filesep = self.clientDTP.determineServerFileSeparator(self.clientPI.rootDirectory)
+		self.clientPI.deleteDirectory(directoryName, filesep[0])
 	
 	def createDirectory(self, newDirectoryName):
 		'''
@@ -735,9 +1013,10 @@ class FTPClient():
 			
 			param newDirectoryName
 		'''
-		self.clientPI.makeWorkingDirectory(newDirectoryName)
+		filesep = self.clientDTP.determineServerFileSeparator(self.clientPI.rootDirectory)
+		self.clientPI.makeWorkingDirectory(newDirectoryName,filesep[0])
 	
-	def upload(self, file, currentDirectory):
+	def upload(self, file, currentDirectory, progress_callback=None):
 		'''
 			upload will call Client DTP to open a Passive Data Connection 
 			to upload the requested file and save it in the specified path
@@ -746,9 +1025,10 @@ class FTPClient():
 			param file
 			param currentDirectory
 		'''
-		self.clientDTP.upload(self.clientPI, file, currentDirectory)
+		self.listOfFiles = self.clientDTP.upload(self.clientPI, file, currentDirectory, progress_callback)
 		
-	def download(self, file, outputPath):
+		
+	def download(self, file, outputPath, progress_callback=None):
 		'''
 			download will call the Client DTP to open a Passive Data Connection 
 			to download the requested file and save it in the specified path.
@@ -756,7 +1036,7 @@ class FTPClient():
 			param file
 			param outputPath
 		'''
-		self.clientDTP.download(self.clientPI, file, outputPath)
+		self.listOfFiles = self.clientDTP.download(self.clientPI, file, outputPath, progress_callback)
 		
 	def updateDirectoryList(self):
 		'''
@@ -769,6 +1049,10 @@ class FTPClient():
 		
 		self.listOfFiles = listOfFiles
 		return self.listOfFiles
+	
+	def checkServerStatus(self):
+		self.clientPI.sendCommand()
+		self.clientPI.getServerResponse()
 		
 	def logout(self):
 		'''
