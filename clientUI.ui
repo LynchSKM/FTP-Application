@@ -40,6 +40,11 @@
   <property name="windowTitle">
    <string>GROUP 6 FTP CLIENT</string>
   </property>
+  <property name="windowIcon">
+   <iconset>
+    <normalon>assets/app.png</normalon>
+   </iconset>
+  </property>
   <widget class="QWidget" name="centralwidget">
    <widget class="QGroupBox" name="groupBoxLogin">
     <property name="enabled">
